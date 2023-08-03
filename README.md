@@ -1,6 +1,6 @@
 # conception_intro_data
 
-Please clone this repo, create a branch for yourself, and then explore the scRNAseq data from this[https://www.science.org/doi/epdf/10.1126/science.abe0237] paper. Data is provided in the data directory as an RDS for a monocle3 object holding unprocessed matrices + metadata. 
+Please clone this repo, create a branch for yourself, and then explore the scRNAseq data from [this](https://www.science.org/doi/epdf/10.1126/science.abe0237) paper. Data is provided in the data directory as an RDS for a monocle3 object holding unprocessed matrices + metadata. 
 
 Please perform the following tasks and present your work product as a knitted RMD (knit to html). 
   1. Preprocess and cluster the data - annotate decisions in the RMD.
