@@ -9,4 +9,4 @@ Please perform the following tasks and present your work product as a knitted RM
 
 Submit by pushing to your code & html files to your branch. 
 
-We suggest to not spend more than ~3hrs total on this. Feel free to explore beyond the starter questions here -- find anything particularly interesting? Let's discuss! 
+We suggest to not spend more than ~3hrs total on this. Feel free to explore beyond the starter questions here. Find anything particularly interesting? Let's discuss! 
