@@ -7,6 +7,6 @@ Please perform the following tasks and present your work product as a knitted RM
   2. Roughly label celltypes -- this should include at least granulosa, soma, and germ cells. Can you get any more specific? Are there other additional celltypes? Show plots supporting your celltype labels. 
   3. How do celltypes compare across ages or across in vivo/in vitro samples? (open ended) 
 
-Submit by pushing to your code & html files to your branch. 
+Submit by pushing to your code & html files to your branch and submitting a pull request.
 
 We suggest to not spend more than ~3hrs total on this. Feel free to explore beyond the starter questions here. Find anything particularly interesting? Let's discuss! 
