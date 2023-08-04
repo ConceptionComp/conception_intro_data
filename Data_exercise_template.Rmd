@@ -1,0 +1,87 @@
+---
+title: "conception_intro_data"
+output: html_document
+date: '2023-08-04'
+---
+
+# Yoshino 2021 Mouse OSC Data Exercise 
+
+**Name:** Add your name here
+
+## Instructions 
+
+Please clone this repo, create a branch for yourself, and then explore the scRNAseq data from [this](https://www.science.org/doi/epdf/10.1126/science.abe0237) paper. 
+<br>
+
+Data is provided in the data directory as an RDS for a monocle3 object holding unprocessed matrices + metadata. Note: to reduce the RDS to within github size limits, we've filtered some non/lowly expressed genes and downsampled the data to 65% of the original cellcount per sample. 
+<br>
+
+Please perform the following tasks and present your work product as a knitted RMD (knit to html). <br>
+- Preprocess and cluster the data - annotate decisions in the RMD, we'd like to see your process. 
+- Roughly label celltypes -- this should include at least granulosa, soma, and germ cells. Can you get any more specific? Are there other additional celltypes? Show plots supporting your celltype labels. 
+- How do celltypes compare across ages or across in vivo/in vitro samples? (open ended) 
+<br>
+
+Submit by pushing to your code & html files to your branch. 
+<br>
+
+We suggest to not spend more than ~3hrs total on this. Feel free to explore beyond the starter questions here. Find anything particularly interesting? Let's discuss! 
+<br>
+
+# Load Data and set up the RMD
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+```
+
+```{r load_packages, include=FALSE}
+library(monocle3)
+library(ggplot2)
+
+```
+
+```{r load_data, include=FALSE}
+cds<-readRDS("data/Yoshino_2021_unprocessed_downsampled.RDS")
+```
+
+
+# QC checks & Filtering
+
+```{r QC_and_filter}
+
+
+```
+
+
+# Preprocess & Cluster
+
+```{r preprocess}
+
+
+```
+
+
+# Celltype Identification
+
+
+```{r celltypeID}
+
+
+```
+
+
+
+# Anything else of interest?
+
+```{r play}
+
+
+```
+
+
+
+## SessionInfo
+```{r sessionInfo}
+sessionInfo()
+```
