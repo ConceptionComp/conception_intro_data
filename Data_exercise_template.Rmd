@@ -6,7 +6,7 @@ date: '2023-08-04'
 
 # Yoshino 2021 Mouse OSC Data Exercise 
 
-**Name:** Add your name here
+**Name:** Jeremy Lotto
 
 ## Instructions 
 
@@ -30,6 +30,9 @@ We suggest to not spend more than ~3hrs total on this. Feel free to explore beyo
 
 # Load Data and set up the RMD
 
+Data loaded as monocle3 object. The object is already downsampled slightly but otherwise unprocessed. Metadata includes sample names, size factors, E day (age), Tissue, organism, and strain.
+<br>
+
 ```{r setup, include=FALSE}
 library(knitr)
 opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
@@ -38,47 +41,308 @@ opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
 ```{r load_packages, include=FALSE}
 library(monocle3)
 library(ggplot2)
-
+library(Seurat)
+library(nichenetr)
+library(dplyr)
+library(tidyr)
+library(biomaRt)
 ```
 
 ```{r load_data, include=FALSE}
-cds<-readRDS("data/Yoshino_2021_unprocessed_downsampled.RDS")
+
+cds <- readRDS("C://Users/Jeremy/conception_intro_data/data/Yoshino_2021_unprocessed_downsampled.RDS")
+
+# 13214x12378 matrix (already downsampled, but otherwise unprocessed) 
+# metadata includes sample names, size factors, E day (age), Tissue, organism, and strain.
+# samples: 6 total (correspond basically to age)
+# age: E10.5, E11.5, E12.5, E13.5, E14.5, and induced
+# strain: induced are C57/bl6, in vivo samples are from CD-1/ICR
+# Tissue: ES-derived or in vivo gonad
+# Organism: all mouse
+# Size Factors are included in colData as not possible to reliably calculate with downsampled data
+
 ```
 
 
 # QC checks & Filtering
 
+Overall, these data looked pretty nice prior to QC. I looked at the library size (total transcripts), number of expressed genes per cell, mitochondrial RNA content, and ribosomal RNA content. They are quite consistent between libraries, even in cells generated from iPSCs. 
+<br>
+
+I kept cells that have more than 1200 expressed genes (this was determined empirically based on the distribution of the data) and a mitochondrial fraction below 10%. This eliminated 683 low quality cells from downstream analyses. I've included violin plots generated before and after data filtering.
+<br>
+
+Violin plots showing QC metrics before data filtration.
+<br>
+
 ```{r QC_and_filter}
 
+#Get the total number of transcripts captured per cell as well as the total number of genes captured per cell. These metrics will be slightly less than reality as some filtering has already been done.
+lib.sizes = colSums(as.matrix(cds@assays@data$counts))
+ngenes = Matrix::colSums(cds@assays@data$counts > 0)
+
+#Use BioMart to grab mitochondrial genes and calculate mitochondrial RNA fraction in each cell 
+mouse_ensembl = useMart("ensembl")
+mouse_ensembl = useDataset("mmusculus_gene_ensembl", mart = mouse_ensembl)
+gene_map = getBM(attributes=c("ensembl_gene_id", "chromosome_name"), filters = "ensembl_gene_id", values =  rownames(cds), mart = mouse_ensembl)
+mt.counts = cds@assays@data$counts[which(rownames(cds) %in% gene_map$ensembl_gene_id[gene_map$chromosome_name=="MT"]),]
+mt.fraction = colSums(as.matrix(mt.counts))/lib.sizes
+
+#Calculate ribosomal RNA fraction in each cell 
+ribo_genes <- rownames(cds)[grep("^Rp[sl]", cds@rowRanges@elementMetadata@listData$gene_short_name)]
+ribo.fraction <- colSums(cds@assays@data@listData$counts[ribo_genes, ])/lib.sizes
+
+#Add each of these metrics to the colData of the cds object
+colData(cds)$mt.fraction <- mt.fraction
+colData(cds)$lib.sizes <- lib.sizes
+colData(cds)$ngenes <- ngenes
+colData(cds)$ribo.fraction <- ribo.fraction
+
+#Plot and visualize these metrics 
+QC_data <- data.frame("Age" = colData(cds)$Age, "MTper" = colData(cds)$mt.fraction, "LibSize"= colData(cds)$lib.sizes, "nGenes" = colData(cds)$ngenes, "Ribper" = colData(cds)$ribo.fraction)
+
+#Plot metrics pre-filtering. Data is relatively consistent across samples. 
+ggplot(QC_data, aes(x = Age, y = LibSize)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) + scale_y_continuous(trans='log10') +ggtitle("Library size Raw")
+ggplot(QC_data, aes(x = Age, y = nGenes)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) + scale_y_continuous(trans='log10') +ggtitle("nGenes Raw")
+ggplot(QC_data, aes(x = Age, y = Ribper)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) +ggtitle("Ribo % Raw")
+ggplot(QC_data, aes(x = Age, y = MTper)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) +ggtitle("Mito % Raw")
+
+#Keep cells that have more than 1200 expressed genes (this was determined empirically based on the distribution of the data) and a mitochondrial fraction below 10%. 
+#This will eliminate 12378-11695=683 low quality cells
+cells.to.keep <- setdiff(which(colData(cds)$ngenes > 1200),which(colData(cds)$mt.fraction >0.1))
+orig.cellnum <- ncol(cds)
+cds_backup <- cds
+cds <- cds[, cells.to.keep]
 
 ```
 
+Violin plots showing QC metrics after data filtration.
+<br>
+
+```{r QC_and_filter2}
+#Plot metrics post-filtering as a sanity check.   
+QC_data_filt <- data.frame("Age" = colData(cds)$Age, "MTper" = colData(cds)$mt.fraction, "LibSize"= colData(cds)$lib.sizes, "nGenes" = colData(cds)$ngenes, "Ribper" = colData(cds)$ribo.fraction)
+ggplot(QC_data_filt, aes(x = Age, y = LibSize)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) + scale_y_continuous(trans='log10') +ggtitle("Library size Filtred")
+ggplot(QC_data_filt, aes(x = Age, y = nGenes)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) + scale_y_continuous(trans='log10') +ggtitle("nGenes Filtred")
+ggplot(QC_data_filt, aes(x = Age, y = Ribper)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) +ggtitle("Ribo % Filtred")
+ggplot(QC_data_filt, aes(x = Age, y = MTper)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) +ggtitle("Mito % Filtred")
+
+```
 
 # Preprocess & Cluster
 
+UMAP dimensionality reduction using the first 20 PCs was done before and after batch correction. Uncorrected data showed poor integration between datasets/timepoints. Nearest-neighbour batch correction approximated these data and gave us a more cohesive dataset to work with. 
+<br>
+
+Leiden clustering shows 9 populations, which are defined in the next section. I used a k of 15, which gave me clusters that made sense given the overall shape of the UMAP. 
+<br>
+
 ```{r preprocess}
 
+#Reduced PCs to 20 as it did not add much extra complexity and my computer had issues computing with higher PCs. preprocess_cds() also performs log and size factor normalization and scales data for downstream analysis.
+cds <- preprocess_cds(cds, method = "PCA",  num_dim = 20)
+plot_pc_variance_explained(cds)
 
+cds <- reduce_dimension(cds, reduction_method = "UMAP", preprocess_method = "PCA", umap.min_dist=0.5, umap.n_neighbors = 30)
+plot_cells(cds, color_cells_by = "Age", label_cell_groups = F) + ggtitle("Pre-batch correction")
+
+#MNN batch correction performed using align_cds() to better integrate datasets.
+cds <- align_cds(cds, preprocess_method = "PCA", alignment_group = "Age")
+cds <- reduce_dimension(cds, reduction_method = "UMAP", preprocess_method = "Aligned", umap.min_dist=0.5, umap.n_neighbors = 30)
+plot_cells(cds, color_cells_by = "Age", label_cell_groups = F) + ggtitle("Batch corrected")
+
+#Clustering performed using Leiden clustering, k NN parameter changed as default 20 yielded low resolution groups.
+cds <- cluster_cells(cds, reduction_method = "UMAP", k = 15)
+plot_cells(cds, color_cells_by = "cluster", label_cell_groups=FALSE) + ggtitle("Batch corrected")
 ```
 
 
 # Celltype Identification
 
+I used a couple simple strategies to define the cell populations in this dataset.
+<br>
+
+* Timepoint distribution across the identified clusters
+* Differential gene expression analysis between the identified clusters
+* Prior knowledge from Yoshino et al. and from other reviews online
+<br>
+
+My understanding is that the early progenitors contribute to somatic progenitors, which give rise to both granulosa cells and stromal cells. I was able to identify granulosa cells, somatic progenitors, early progenitors, stromal cells, germ cells, endothelial cells, erythrocytes, and megakaryocytes. I was not able to properly define cluster 8 (more in the next section).
+<br>
+
+* cluster 1 = granulosa (Kitl, Inha, Foxl2)
+* cluster 2 = somatic progenitors (High Alcam, Wt1, Upk3b)
+* cluster 3 = early progenitors (Sox11, Foxp2, Nr2f1)
+* cluster 4 = stromal cells (Tcf21, Acta2, Pdgfra)
+* cluster 5 = germ cells (Pou5f1, Ddx4, Dppa5a)
+* cluster 6 = endothelium (Cdh5, Kdr, Pecam1)
+* cluster 7 = erythrocytes (Gypa, Hba-a1, Hbb-y)
+* cluster 8 = unclear
+* cluster 9 = megakaryocytes (Plek, Pf1)
+<br>
 
 ```{r celltypeID}
 
+#Which timepoints contribute to which clusters?
+heatmap(table(cds@clusters$UMAP$clusters, colData(cds)$Age), scale = "column")
+
+#Perform differential gene expression analysis to identify enriched genes within each cluster.
+#cds_markers <- top_markers(cds, group_cells_by = "cluster", verbose = FALSE, )
+
+#Highlight the expression of specific genes that are identified in the differential expression analysis and in the literature, including Yoshino et al.
+plot_genes_by_group(cds, c("Cdh5", "Plek", "Gypa", "Kitl", "Foxl2", "Pdgfra", "Acta2", "Tcf21", "Sox11", "Nr2f1", "Pou5f1", "Ddx4", "Dppa5a", "Wt1", "Alcam", "Upk3b", "Foxp2"), group_cells_by="cluster", ordering_type="maximal_on_diag", max.size=10, scale_max = 0.5) + ggtitle("Gene expression across clusters")
+plot_cells(cds, genes= c("Foxl2", "Acta2", "Nr2f1", "Upk3b", "Alcam", "Pou5f1"), show_trajectory_graph=FALSE, label_cell_groups=FALSE)
+
+#Based on differentially-expressed genes, timepoint contribution, and lists of characterized marker genes from Yoshino et al., we can identify the captured populations from these scRNAseq data. My understanding is that the early progenitors contribute to somatic progenitors, which give rise to both granulosa cells and stromal cells. 
+#cluster 1 = granulosa (Kitl, Inha, Foxl2)
+#cluster 2 = somatic progenitors (High Alcam, Wt1, and Upk3b)
+#cluster 3 = early progenitors (Sox11, Foxp2, and Nr2f1)
+#cluster 4 = stromal cells (Tcf21, Acta2, Pdgfra)
+#cluster 5 = germ cells (Pou5f1, Ddx4, Dppa5a)
+#cluster 6 = endothelium (Cdh5, Kdr, Pecam1)
+#cluster 7 = erythrocytes (Gypa, Hba-a1, Hbb-y)
+#cluster 8 = unclear
+#cluster 9 = megakaryocytes (Plek, Pf1)
+
+colData(cds)$assigned_cell_type <- as.character(cds@clusters$UMAP$clusters)
+colData(cds)$assigned_cell_type <- dplyr::recode(colData(cds)$assigned_cell_type,
+                                                 "1"="granulosa",
+                                                 "2"="somatic progenitors",
+                                                 "3"="early progenitors",
+                                                 "4"="stromal cells",
+                                                 "5"="germ cells",
+                                                 "6"="endothelium",
+                                                 "7"="erythrocytes",
+                                                 "8"="unclear",
+                                                 "9"="megakaryocytes")
+
+plot_cells(cds, group_cells_by="cluster", color_cells_by="assigned_cell_type", label_cell_groups=FALSE)
 
 ```
 
+I did notice that while cluster identification for most populations was quite clear, I could not successfully identify cluster 8. Looking at QC data between custers, however, provides some clarity. Cluster 8 is composed of low quality cells and is likely not a real cell population.
+<br>
 
+```{r cluster 8}
+#How do the quality metrics look across each cluster? Cluster 8 is low quality, may not be a real population.
+QC_data_filt2 <- data.frame("Cluster" = cds@clusters$UMAP$clusters, "MTper" = colData(cds)$mt.fraction, "LibSize"= colData(cds)$lib.sizes, "nGenes" = colData(cds)$ngenes, "Ribper" = colData(cds)$ribo.fraction)
+ggplot(QC_data_filt2, aes(x = Cluster, y = LibSize)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) + scale_y_continuous(trans='log10') +ggtitle("Library size Filtred")
+ggplot(QC_data_filt2, aes(x = Cluster, y = nGenes)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) + scale_y_continuous(trans='log10') +ggtitle("nGenes Filtred")
+ggplot(QC_data_filt2, aes(x = Cluster, y = Ribper)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) +ggtitle("Ribo % Filtred")
+ggplot(QC_data_filt2, aes(x = Cluster, y = MTper)) + geom_violin() + geom_jitter(shape=16, position=position_jitter(0.2), size =0.05, alpha=0.2) +ggtitle("Mito % Filtred")
+```
 
-# Anything else of interest?
+# Cell signaling niche at E12.5
+
+My aim for this last section was to identify signals at E12.5 from the developing gonad in vivo that may drive germ cell development. I then wanted to compare the candidate signaling ligands identified in vivo to what is expressed in the in vitro generated tissues from iPSCs. 
+<br>
+
+To do this, I applied [NicheNet](https://github.com/saeyslab/nichenetr) to identify ligands from the granulosa cells, stromal cells, endothelium, and somatic progenitors at E12.5 that may guide germ cell development and maturity. NicheNet integrates existing knowledge on ligand-to-target signaling paths to predict ligand-receptor interactions that may drive gene expression changes in the cells of interest. 
+<br>
+
+I used genes from the germ cell population enriched at E13.5 in comparison to E12.5 as a gene set of interest for NicheNet, which according to gene ontology analysis are highly enriched for genes related to synaptonemal complex assembly, meiosis, and oogenesis. This includes  Dmc1, Rec8, Meioc, Stra8, and others. The vast majority of these genes remain robustly expressed at E14.5.
+<br>
+
+Overall, expression of identified signaling factors are well-conserved between in vivo and iPSC-derived gonadal tissue. Factors including Rspo1, Calr, Igf2, Tgfb1, and Wnt5a were identified as candidate ligands that may play a role in germ cell development at E12.5.
+<br>
+
+Some differences do exist, however, including enriched expression of Rspo1, Hbegf, and Angptl4 in in vivo tissue at E12.5. Interestingly, Wbp1 and perhaps Tgfb1 are more robustly expressed in iPSC-derived tissue.
+<br>
+
+Ideally, I would have a little more time to delve deeper into these interactions, including looking at different timepoints and looking more closely at cell-type specific interactions during development. 
+<br>
 
 ```{r play}
 
+#Are the signals at E12.5 from the developing gonad that drive in vivo germ cell development present in the iPSC-derived lineages?
+
+#Convert data to Seurat objects and perform very basic cell signaling analysis using NicheNet to see which factors might guide germ cell development. We'll then compare this with the signaling factors that are expressed in the iPSC-derived lineages. 
+
+#Let's subset the germ cell lineage and convert to Seurat object, then look to see what changes in gene expression occur during development. We'll focus on gene expression differences between E12.5 and E13.5, as the authors claim their iPSC-derived cells most closely resemble gonadal cells at E12.5
+rownames(cds) <- cds@rowRanges@elementMetadata$gene_short_name
+count.mat2 <- assay(cds)
+meta.df2 <- as.data.frame(colData(cds))
+seurat <- CreateSeuratObject(counts = count.mat2, project = "Conception_data", assay = "RNA", meta.data = meta.df2)
+
+#Quick normalization, and perform DE analysis across timepoints in the germ cell subset.
+seurat <- SetIdent(seurat, value = seurat@meta.data$assigned_cell_type)
+seurat_gc <- subset(seurat, idents = "germ cells")
+seurat_gc <- NormalizeData(seurat_gc, verbose = FALSE)
+seurat_gc <- FindVariableFeatures(seurat_gc, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+all.genes <- rownames(seurat_gc)
+seurat_gc <- ScaleData(seurat_gc, features = all.genes, verbose = FALSE)
+seurat_gc <- SetIdent(seurat_gc, value = seurat_gc@meta.data$Age)
+
+#Find genes enriched in E13.5 germ cells in comparison to E12.5. This gene list will be our gene set of interest in the downstream analysis with NicheNet.
+DEG_E12_E13 <- FindMarkers(seurat_gc, ident.1 = "E13.5", ident.2 = "E12.5", features = VariableFeatures(seurat_gc), logfc.threshold = 0.5, min.pct = 0.2, only.pos = T)
+DotPlot(seurat_gc, features = rownames(DEG_E12_E13)) + RotatedAxis() + ggtitle("Germ cell genes enriched over development")
+
+#Quick gene ontology search for these genes (geneontology.org) shows enrichment of processes related to synaptonemal complex assembly, meiosis, and oogenesis. This includes  Dmc1, Rec8, Meioc, Stra8, and others. 
+GO_E135_genes <- read.delim("C://Users/Jeremy/Downloads/analysis_gonad.txt")
+
+#Convert complete cds to seurat and subset only E12.5 and induced data for cell signaling analysis.
+seurat <- SetIdent(seurat, value = seurat@meta.data$Age)
+seurat_sig <- subset(seurat, idents = c("E12.5", "Induced"))
+seurat_sig <- NormalizeData(seurat_sig, verbose = FALSE)
+seurat_sig <- FindVariableFeatures(seurat_sig, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+seurat_sig <- ScaleData(seurat_sig, features = all.genes, verbose = FALSE)
+#We'll come back to this later to compare the expression of factors identified by NicheNet.
+
+#Subset only the cells from E12.5 to identify signaling factors at this stage using NicheNet.
+germ_sig <- subset(seurat_sig, idents = c('E12.5'))
+germ_sig <- SetIdent(germ_sig, value = germ_sig@meta.data$assigned_cell_type)
+germ_sig <- NormalizeData(germ_sig, verbose = FALSE)
+germ_sig <- FindVariableFeatures(germ_sig, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+germ_sig <- ScaleData(germ_sig, features = all.genes, verbose = FALSE)
+
+#What candidate factors from the granulosa, somatic progenitors, stromal cells, and endothelium at E12.5 might drive germ cell development?
+#germ_genes will act as our geneset of interest, which includes genes that change during germ cell development. Nichenet uses these as target genes to score candidate ligands that may contribute to development.
+germ_genes <- rownames(DEG_E12_E13)
+
+#Load network data from Nichenet. ligand_target_matrix and weighted_networks kept giving me errors, so I locally downloaded them first.
+lr_network = readRDS(url("https://zenodo.org/record/7074291/files/lr_network_mouse_21122021.rds"))
+ligand_target_matrix = readRDS("C://Users/Jeremy/Downloads/ligand_target_matrix_nsga2r_final_mouse.rds")
+weighted_networks = readRDS("C://Users/Jeremy/Downloads/weighted_networks_nsga2r_final_mouse.rds")
+lr_network = lr_network %>% distinct(from, to)
+weighted_networks_lr = weighted_networks$lr_sig %>% inner_join(lr_network %>% distinct(from,to), by = c("from","to"))
+ligand_target_matrix = ligand_target_matrix %>% .[!is.na(rownames(ligand_target_matrix)), !is.na(colnames(ligand_target_matrix))]
+
+#Define receiver cells, sender cells, and genes expressed by these populations
+receiver = c("germ cells")
+sender_celltypes = c('granulosa', 'somatic progenitors', 'stromal cells', 'endothelium')
+list_expressed_genes_receiver = receiver %>% unique() %>% lapply(get_expressed_genes, germ_sig, 0.25)
+expressed_genes_receiver = list_expressed_genes_receiver %>% unlist() %>% unique()
+background_expressed_genes = expressed_genes_receiver %>% .[. %in% rownames(ligand_target_matrix)]
+list_expressed_genes_sender = sender_celltypes %>% unique() %>% lapply(get_expressed_genes, germ_sig, 0.25)
+expressed_genes_sender = list_expressed_genes_sender %>% unlist() %>% unique()
+
+#Nichenet uses expression data to define potential interactions between ligands and receptors between the defined sender and receiver cells. Then, using their model they define the potential activity of these ligands based on prior knowledge from the literature which they have compiled.
+geneset_oi = as.character(germ_genes) %>% .[. %in% rownames(ligand_target_matrix)]
+ligands = lr_network %>% pull(from) %>% unique()
+receptors = lr_network %>% pull(to) %>% unique()
+expressed_ligands = intersect(ligands,expressed_genes_sender)
+expressed_receptors = intersect(receptors,expressed_genes_receiver)
+potential_ligands = lr_network %>% filter(from %in% expressed_ligands & to %in% expressed_receptors) %>% pull(from) %>% unique()
+ligand_activities = predict_ligand_activities(geneset = geneset_oi, background_expressed_genes = background_expressed_genes, ligand_target_matrix = ligand_target_matrix, potential_ligands = potential_ligands)
+ligand_activities_filtred = ligand_activities %>% arrange(-pearson) %>% mutate(rank = rank(desc(pearson))) %>% filter(pearson>0)
+best_upstream_ligands <- ligand_activities$test_ligand
+
+#High pearson correlation values indicates enrichment of ligand-target genes in the geneset of interest we provided. Calr and Rspo1 are the top-enriched ligands in this analysis.
+ggplot(as.data.frame(ligand_activities_filtred), aes(test_ligand, pearson)) + geom_col() + ggtitle("Candidate signaling factors guiding germ cell development")
+
+#Let's compare the expression of these ligands in the E12.5 in vivo data and the iPSC-derived data.
+seurat_sig <- SetIdent(seurat_sig,value = seurat_sig@meta.data$assigned_cell_type)
+seurat_sig <- subset(seurat_sig, idents = c('granulosa', 'somatic progenitors', 'stromal cells', 'endothelium'))
+time_type <- paste(seurat_sig@meta.data$Age, seurat_sig@meta.data$assigned_cell_type, sep = "_")
+seurat_sig <- AddMetaData(seurat_sig, metadata = time_type, col.name = "time_type")
+seurat_sig <- SetIdent(seurat_sig,value = seurat_sig@meta.data$time_type)
+DotPlot(seurat_sig, features = ligand_activities_filtred$test_ligand) + RotatedAxis() + ggtitle("Expression of candidate signaling factors")
+
+#Overall, expression of identified signaling factors are well-conserved between in vivo and iPSC-derived gonadal tissue. Some differences do exist, however, including enriched expression of Rspo1, Hbegf, and Angptl4. Interestingly, Wbp1 and perhaps Tgfb1 are more robustly expressed in iPSC-derived tissue.
+
+#Ideally, I would have a little more time to delve deeper into these interactions, including looking at different timepoints and looking more closely at cell-type specific interactions during development. 
 
 ```
-
 
 
 ## SessionInfo
